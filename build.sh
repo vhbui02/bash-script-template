@@ -3,22 +3,36 @@
 # ============================================================================ #
 
 ## FILE         : build.sh
-## VERSION      : v3.0.0
+## VERSION      : 1.0.0
 ## DESCRIPTION  : Merge source and script into template
 ## AUTHOR       : silverbullet069
 ## REPOSITORY   : https://github.com/Silverbullet069/bash-script-template
 ## LICENSE      : BSD-3-Clause
 
-## TEMREPO      : https://github.com/Silverbullet069/bash-script-template
-## TEMMODE      : lite
-## TEMVER       : v3.0.0
-## TEMUPDATED   : 2025-06-21 19:15:03.788041997 +0700
-## TEMLIC       : BSD-3-Clause
-
 # ============================================================================ #
 
+# DESC: An 'echo' wrapper that redirects standard output to standard error
+# ARGS: $@ (required): Message(s) to echo
+# OUTS: None
+# RETS: None
+function log() {
+    echo "$@" >&2
+}
+
+# FUNCTION: check_binary
+# DESC: Checks if a given binary/command is available in the system's PATH.
+# ARGS: $1 (required): Name of the binary/command to check.
+# OUTS: Prints an error message to stderr if the binary is missing.
+# RETS: Returns 1 if the binary is missing, 0 otherwise.
+function check_binary() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        log "Missing dependency '$1'"
+        return 1
+    fi
+}
+
 # DESC: Acquire script lock, extracted from script.sh
-# ARGS: $1 (optional): Scope of script execution lock (system or user)
+# ARGS: $1 (required): Scope of script execution lock (system or user)
 # OUTS: None
 # RETS: None
 # NOTE: This lock implementation is extremely simple but should be reliable
@@ -32,15 +46,15 @@ function lock_init() {
     elif [[ "${1}" = "user" ]]; then
         lock_dir="/tmp/$(basename "${BASH_SOURCE[0]}").${UID}.lock"
     else
-        echo "Missing or invalid argument to ${FUNCNAME[0]}()!" >&2
+        log "Missing or invalid argument to ${FUNCNAME[0]}()!"
         exit 1
     fi
 
     if mkdir "${lock_dir}" 2>/dev/null; then
         readonly script_lock="${lock_dir}"
-        echo "Acquired script lock: ${script_lock}"
+        log "Acquired script lock: ${script_lock}"
     else
-        echo "Unable to acquire script lock: ${lock_dir}" >&2
+        log "Unable to acquire script lock: ${lock_dir}"
         exit 2
     fi
 }
@@ -53,7 +67,7 @@ function script_trap_exit() {
     # Remove script execution lock
     if [[ -d "${script_lock-}" ]]; then
         rmdir "${script_lock}"
-        echo "Clean up script lock: ${script_lock}" >&2
+        log "Clean up script lock: ${script_lock}"
     fi
 }
 
@@ -76,22 +90,22 @@ function build() {
     local -r template_path="${3}"
 
     if [[ ! -f "${source_path}" ]]; then
-        echo "source.sh not found: ${script_path}" >&2
+        log "source.sh not found: ${script_path}"
         exit 1
     fi
 
     if [[ ! -r "${source_path}" ]]; then
-        echo "source.sh is unreadable: ${script_path}" >&2
+        log "source.sh is unreadable: ${script_path}"
         exit 1
     fi
 
     if [[ ! -f "${script_path}" ]]; then
-        echo "script.sh not found: ${script_path}" >&2
+        log "script.sh not found: ${script_path}"
         exit 1
     fi
 
     if [[ ! -r "${script_path}" ]]; then
-        echo "script.sh is unreadable: ${script_path}" >&2
+        log "script.sh is unreadable: ${script_path}"
         exit 1
     fi
 
@@ -100,19 +114,22 @@ function build() {
     local -r source_body=$(tail -n +12 "${source_path}")
     local -r script_body=$(tail -n +19 "${script_path}" | grep -vE -e '^# shellcheck source=source.sh$' -e '^# shellcheck disable=SC1091$' -e '^source.*source\.sh"$')
 
+    # temporily make it writeable
     chmod 755 "${template_path}"
     {
-        echo "${script_header}"
-        echo "${source_body}"
-        echo "${script_body}"
-    } >"${template_path}"
+        log "${script_header}"
+        log "${source_body}"
+        log "${script_body}"
+    } 2>"${template_path}"
 
+    # then, make it read-only
     chmod 555 "${template_path}"
-    echo "Build ${template_path} successfully."
+
+    log "Build ${template_path} successfully."
 }
 
 function cleanup() {
-    echo "Stopping file monitor..."
+    log "Stopping file monitor..."
     exit 0
 }
 
@@ -138,7 +155,7 @@ function main() {
             --event "close_write" \
             "${source_path}" "${script_path}" \
             | while read -r dir event file; do
-                echo "Change detected: ${event} on ${dir}${file}"
+                log "Change detected: ${event} on ${dir}${file}"
                 # NOTE: add a small delay to allow accumulation of multiple changes
                 sleep 1
                 build "${source_path}" "${script_path}" "${template_path}"

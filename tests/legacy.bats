@@ -3,20 +3,32 @@
 # shellcheck disable=SC2154
 
 setup_file() {
-    # provision testing environment here
-    # ...
-    :
-}
+    # Get paths
+    export ROOT="$(dirname "${BATS_TEST_DIRNAME}")"
+    # export BATS_LIB_PATH="${ROOT}/tests/test_helper"
+    export SUT="${ROOT}/template_legacy.sh"
 
-setup() {
-    # NOTE: do not load library in setup_file() function
+    # Load BATS libraries
     bats_load_library bats-support
     bats_load_library bats-assert
     bats_load_library bats-file
 
-    export ROOT="$(dirname "${BATS_TEST_DIRNAME}")"
-    export SUT="${ROOT}/template_legacy.sh"
+    # Ensure test script exists and is executable
     assert_file_exists "${SUT}"
+    assert_file_executable "${SUT}"
+}
+
+setup() {
+    # NOTE: in order for helper functions to be accessed in each test
+    # NOTE: library must be loaded inside setup()
+    bats_load_library bats-support
+    bats_load_library bats-assert
+    bats_load_library bats-file
+
+    local -r script_name=${SUT##*/}
+    if [[ -d "/tmp/${script_name}.${UID}.lock" ]]; then
+        rmdir "/tmp/${script_name}.${UID}.lock"
+    fi
 }
 
 teardown() {

@@ -9,16 +9,16 @@ setup_file() {
 }
 
 setup() {
+    export ROOT="$(dirname "${BATS_TEST_DIRNAME}")"
+    # export BATS_LIB_PATH="${ROOT}/tests/test_helper"
+
     # NOTE: do not load library in setup_file() function
     bats_load_library bats-support
     bats_load_library bats-assert
     bats_load_library bats-file
 
     # Provision target script
-    # shellcheck disable=SC2154
-
-    export SCRIPT_PATH=$(realpath "${BATS_TEST_DIRNAME}/../build.sh")
-    # shellcheck disable=SC2154
+    export SCRIPT_PATH="${ROOT}/build.sh"
     export SCRIPT_UNDER_TEST="${BATS_TEST_TMPDIR}/build.sh"
     cp "${SCRIPT_PATH}" "${SCRIPT_UNDER_TEST}"
     chmod +x "${SCRIPT_UNDER_TEST}"

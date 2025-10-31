@@ -5,28 +5,38 @@
 setup_file() {
     # provision testing environment here
     # ...
-    :
-}
-
-setup() {
-    # NOTE: do not load library in setup_file() function
-    bats_load_library bats-support
-    bats_load_library bats-assert
-    bats_load_library bats-file
-
-    # NOTE: change this if you relocate this file
     export ROOT="$(dirname "${BATS_TEST_DIRNAME}")"
+    # export BATS_LIB_PATH="${ROOT}/tests/test_helper"
     export SUT="${ROOT}/clone.sh"
 
-    # Export FILES associative array for use in subshells
-    declare -gA FILES=(
+    bats_load_library "bats-support"
+    bats_load_library "bats-assert"
+    bats_load_library "bats-file"
+
+    export PATH="${ROOT}:${PATH}"
+
+    # Export SUTS associative array for use in subshells
+    declare -gA SUTS=(
         ["src"]="script.sh"
         ["full"]="template.sh"
         ["lite"]="template_lite.sh"
         ["legacy"]="template_legacy.sh"
     )
 
-    PATH="${ROOT}:${PATH}"
+    for sut_key in "${!SUTS[@]}"; do
+        local sut_path="${ROOT}/${SUTS["${sut_key}"]}"
+        assert_file_exists "${sut_path}"
+        assert_file_executable "${sut_path}"
+    done
+}
+
+setup() {
+    # NOTE: in order for helper functions to be accessed in each test
+    # NOTE: library must be loaded inside setup()
+    bats_load_library bats-support
+    bats_load_library bats-assert
+    bats_load_library bats-file
+
     cd "${BATS_TEST_TMPDIR}" || exit 1
 }
 
@@ -77,7 +87,7 @@ teardown_file() {
 }
 
 @test "Script handles different modes correctly" {
-    for mode in "${!FILES[@]}"; do
+    for mode in "${!SUTS[@]}"; do
         local path="${BATS_TEST_TMPDIR}/test_${mode}.sh"
 
         run "${SUT}" --yes --mode "${mode}" --output "${path}"
@@ -88,7 +98,7 @@ teardown_file() {
         local author="$(grep -i --color=never "url = git@github.com" "/code/.git/config" | sed -E 's/.*github\.com:([^\/]+)\/.*/\1/')"
         # shellcheck disable=SC2012
         local tag="$(ls -t "${ROOT}/.git/refs/tags" | head -n1)"
-        local updated="$(stat -c "%y" "${ROOT}/${FILES["${mode}"]}")"
+        local updated="$(stat -c "%y" "${ROOT}/${SUTS["${mode}"]}")"
 
         assert_file_not_contains "${path}" "@NAME@"
         assert_file_contains "${path}" "FILE.*$(basename "${path}")" "${path}"

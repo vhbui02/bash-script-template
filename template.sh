@@ -17,35 +17,33 @@
 
 # ============================================================================ #
 
-# ============================================================================ #
-# REGISTRATION                                                                 #
-# ============================================================================ #
+declare -gA OPTION_SHORT=()        # --option => -o
+declare -gA OPTION_TYPE=()         # --option => type_name
+declare -gA OPTION_DEFAULT=()      # --option => default_value
+declare -gA OPTION_REQUIRED=()     # --option => true|false
+declare -gA OPTION_CONSTRAINTS=()  # --option => constraints
+declare -gA OPTION_HELP=()         # --option => help_text
 
-# option name -> "short|default|help|type|required|constraints"
-declare -gA OPTIONS=()
+# --optionA, --optionB, --optionC ...
+declare -ga ORDERS=()
 
-# option name only
-declare -ag ORDERS=()
-
-# option name -> value
+# --option ==> value
 declare -gA VALUES=()
 
 # DESC: Get option name in long form, given its short form
 # ARGS: $1 (required): short option name
-# OUTS: Option
+# OUTS: Option name in stdout
 # RETS: 0 on success, 2 on failure
-function get_long_name() {
+function get_name() {
     if [[ -z "${1-}" ]]; then
         script_exit "Short option name is empty"
     fi
     local -r param="$1"
 
-    for name in "${!OPTIONS[@]}"; do
-        local metadata="${OPTIONS["${name}"]}"
-        local short
-        IFS="${DELIM}" read -r short _ _ _ _ _ <<<"${metadata}"
+    for long in "${!OPTION_SHORT[@]}"; do
+        local short="${OPTION_SHORT["${long}"]}"
         if [[ "${param}" == "${short}" ]]; then
-            echo "${name}"
+            echo "${long}"
             return 0
         fi
     done
@@ -53,11 +51,12 @@ function get_long_name() {
     script_exit "Unknown short option: ${param}"
 }
 
-# NOTE: ASCII Unit Separator (0x1F) can't be typed from the keyboard
-declare -gr DELIM=$'\x1F'
+# ============================================================================ #
+# TYPE VALIDATION                                                              #
+# ============================================================================ #
 
 # Type validation functions mapping
-declare -gA VALIDATORS=(
+declare -grA VALIDATORS=(
     ["string"]="validate_string"
     ["int"]="validate_integer"
     ["float"]="validate_float"
@@ -73,32 +72,157 @@ declare -gA VALIDATORS=(
 # ============================================================================ #
 
 # DESC: Register a command-line option
-# ARGS: $1 (required): long-form option name (with -- prefix, e.g. --log-level)
-#       $2 (optional): short-form option name (with - prefix, e.g. -l)
-#       $3 (optional): default value
-#       $4 (optional): help text
-#       $5 (optional): type (string|int|float|path|file|dir|choice|email|url|bool)
-#       $6 (optional): required (true|false)
-#       $7 (optional): constraints (comma-separated for choice type)
+# ARGS: --long (required): long-form option name (with -- prefix, e.g. --log-level)
+#       --short (optional): short-form option name (with - prefix, e.g. -l)
+#       --default (optional): default value
+#       --type (optional): type (string|int|float|path|file|dir|choice|email|url|bool).
+#       --required (optional): required (true|false).
+#       --constraints (optional): constraints (comma-separated for choice type).
+#       --help (optional): help text.
+# OUTS: OPTION_*, ORDERS and VALUES get populated
+# RETS: 0
 function register_option() {
-    if [[ -z "${1-}" ]]; then
-        script_exit "Option name is empty"
+    # default configs
+    local long=""
+    local short=""
+    local type="string"
+    local default=""
+    local required="false"
+    local constraints=""
+    local help="Option help message"
+
+    # Parse named arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --long)
+                long="$2"
+                shift 2
+                ;;
+            --short)
+                short="$2"
+                shift 2
+                ;;
+            --type)
+                type="$2"
+                shift 2
+                ;;
+            --default)
+                default="$2"
+                shift 2
+                ;;
+            --required)
+                required="$2"
+                shift 2
+                ;;
+            --constraints)
+                constraints="$2"
+                shift 2
+                ;;
+            --help)
+                help="$2"
+                shift 2
+                ;;
+            *)
+                script_exit "Unknown argument for register_option(): $1"
+                ;;
+        esac
+    done
+
+    # Validate --long
+    if [[ -z "${long}" ]]; then
+        script_exit "register_option: Missing required parameter --long"
     fi
 
-    local -r name="$1"
-    local -r short="${2:-}"
-    local -r default="${3:-}"
-    local -r help="${4:-"This is a help string"}"
-    local -r type="${5:-string}"
-    local -r required="${6:-false}"
-    local -r constraints="${7:-}"
+    # syntax
+    if [[ ! "${long}" =~ ^-- ]]; then
+        script_exit "register_option: --long must start with '--' (got: '${long}')"
+    fi
 
-    OPTIONS["${name}"]="${short}${DELIM}${default}${DELIM}${help}${DELIM}${type}${DELIM}${required}${DELIM}${constraints}"
-    ORDERS+=("${name}")
-    VALUES["${name}"]="${default}"
+    # duplication
+    if [[ -n "${OPTION_TYPE["${long}"]:-}" ]]; then
+        script_exit "register_option: Option '${long}' already registered"
+    fi
+
+    # Validate short
+    if [[ -n "${short}" ]]; then
+        # syntax
+        if [[ ! "${short}" =~ ^-[[:alnum:]]$ ]]; then
+            script_exit "register_option: --short must be format '-x' where x is alphanumeric (got: '${short}')"
+        fi
+
+        # duplication
+        for existing_key in "${!OPTION_SHORT[@]}"; do
+            if [[ "${OPTION_SHORT["${existing_key}"]}" == "${short}" && "${existing_key}" != "${long}" ]]; then
+                script_exit "register_option: Short option '${short}' is already used by '${existing_key}'"
+            fi
+        done
+    fi
+
+    # Validate type
+    if [[ -z "${VALIDATORS["${type}"]:-}" ]]; then
+        script_exit "register_option: Unknown type '${type}'. Valid types: ${!VALIDATORS[*]}"
+    fi
+
+    # Populate storage arrays
+    OPTION_SHORT["${long}"]="${short}"
+    OPTION_DEFAULT["${long}"]="${default}"
+    OPTION_HELP["${long}"]="${help}"
+    OPTION_TYPE["${long}"]="${type}"
+    OPTION_REQUIRED["${long}"]="${required}"
+    OPTION_CONSTRAINTS["${long}"]="${constraints}"
+
+    ORDERS+=("${long}")
+    VALUES["${long}"]="${default}"
 
     # first validation
-    validate_option "${name}"
+    validate_option "${long}"
+}
+
+# DESC: Register built-in options
+# ARGS: None
+# OUTS: Built-in options are registered
+# RETS: 0 on success
+function register_builtin_options() {
+    register_option \
+        --long "--help" \
+        --short "-h" \
+        --type "bool" \
+        --default "false" \
+        --required "false" \
+        --help "Display this help and exit"
+
+    register_option \
+        --long "--log-level" \
+        --short "-l" \
+        --type "choice" \
+        --default "INF" \
+        --constraints "DBG,INF,WRN,ERR" \
+        --required "false" \
+        --help "Specify the log level to display"
+
+    register_option \
+        --long "--timestamp" \
+        --short "-t" \
+        --type "bool" \
+        --default "false" \
+        --required "false" \
+        --help "Enable timestamp output"
+
+    register_option \
+        --long "--no-color" \
+        --short "-n" \
+        --type "bool" \
+        --default "false" \
+        --required "false" \
+        --help "Disable color output"
+
+    register_option \
+        --long "--quiet" \
+        --short "-q" \
+        --type "bool" \
+        --default "false" \
+        --required "false" \
+        --help "Run silently unless an error is encountered"
 }
 
 # ============================================================================ #
@@ -108,7 +232,7 @@ function register_option() {
 # DESC: Validate string parameter
 # ARGS: $1 (required): value to validate
 #       $2 (optional): constraints (not used)
-# OUTS: None
+# OUTS: Error message if failure
 # RETS: 0 always (string validation always passes unless empty and required)
 function validate_string() {
     if [[ -z "${1-}" ]]; then
@@ -360,8 +484,6 @@ function validate_boolean() {
 # OUTS: VALUES populated with parsed parameters
 # RETS: 0 on success, 2 on failure
 function parse_params() {
-    readonly OPTIONS ORDERS
-
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
         local param="$1"
@@ -373,7 +495,7 @@ function parse_params() {
             exit 0
             ;;
         --*=* | -*=* | --* | -*)
-            # Handle all option formats: --long=value, -short=value, --option value, -o value
+            # Handle all option formats: --long=value, -s=value, --long value, -s value
 
             local name value
             local no_equal=false
@@ -381,28 +503,37 @@ function parse_params() {
                 name="${param%%=*}"
                 value="${param#*=}"
             elif [[ "${param}" == -*=* ]]; then
-                name="$(get_long_name "${param%%=*}")"
+                name="$(get_name "${param%%=*}")"
                 value="${param#*=}"
             elif [[ "${param}" == --* ]]; then
                 name="${param}"
                 no_equal=true
             elif [[ "${param}" == -* ]]; then
-                name="$(get_long_name "${param}")"
+                name="$(get_name "${param}")"
                 no_equal=true
             fi
 
-            if [[ "${no_equal}" == true ]]; then
-                local metadata="${OPTIONS["${name}"]:-}"
-                if [[ -z "${metadata}" ]]; then
-                    script_exit "Option not found: ${name}"
-                fi
+            # extract the type to determine how to handle the value
+            local type="${OPTION_TYPE["${name}"]:-}"
+            if [[ -z "${type}" ]]; then
+                script_exit "Option not found: ${name}"
+            fi
 
-                local type
-                IFS="${DELIM}" read -r _ _ _ type _ _ <<<"${metadata}"
-
-                if [[ "${type}" == "bool" ]]; then
-                    value=true
+            # Boolean options are flags, presence means true
+            if [[ "${type}" == "bool" ]]; then
+                # If user explicitly provides a value with =, validate it
+                if [[ "${no_equal}" == false ]]; then
+                    # Allow --flag=true or --flag=false for explicit control
+                    if [[ "${value}" != "true" && "${value}" != "false" ]]; then
+                        script_exit "Boolean option ${name} requires 'true' or 'false', got: '${value}'"
+                    fi
                 else
+                    # Flag specified without value = true
+                    value=true
+                fi
+            else
+                # Non-boolean options require a value
+                if [[ "${no_equal}" == true ]]; then
                     if [[ $# -eq 0 ]]; then
                         script_exit "Option requires a value: ${name}"
                     fi
@@ -422,7 +553,15 @@ function parse_params() {
         esac
     done
 
-    # NOTE: seal off the associative array VALUES
+    # seal off
+    readonly OPTION_SHORT
+    readonly OPTION_TYPE
+    readonly OPTION_DEFAULT
+    readonly OPTION_REQUIRED
+    readonly OPTION_CONSTRAINTS
+    readonly OPTION_HELP
+
+    readonly ORDERS
     readonly VALUES
 }
 
@@ -449,24 +588,27 @@ function validate_option() {
         script_exit "Option '${param}' not found"
     fi
 
-    local metadata="${OPTIONS["${name}"]:-}"
-    if [[ -z "${metadata}" ]]; then
-        script_exit "Option '${name}' has empty metadata"
-    fi
-
+    local short="${OPTION_SHORT["${name}"]:-}"
+    local type="${OPTION_TYPE["${name}"]:-}"
+    local default="${OPTION_DEFAULT["${name}"]:-}"
+    local required="${OPTION_REQUIRED["${name}"]:-}"
+    local constraints="${OPTION_CONSTRAINTS["${name}"]:-}"
+    local help="${OPTION_HELP["${name}"]:-}"
     local value="${VALUES["${name}"]:-}"
-    if [[ -z "${value}" ]]; then
-        script_exit "Option '${name}' has empty value"
-    fi
 
-    local short default help type required constraints
-    IFS="${DELIM}" read -r short default help type required constraints <<<"${metadata}"
-
-    # short validation
-    validate_string "${short}"
-    if [[ ! "${short}" =~ ^-[[:alnum:]]$ ]]; then
+    # validate short
+    if [[ -n "${short}" && ! "${short}" =~ ^-[[:alnum:]]$ ]]; then
         script_exit "Option '${name}' has invalid short name '${short}'"
     fi
+
+    # type validation
+    validate_string "${type}"
+    if [[ -z "${VALIDATORS[${type}]}" ]]; then
+        script_exit "Option '${name}' has invalid type '${type}'"
+    fi
+
+    # required validation
+    validate_boolean "${required}"
 
     # default validation
     validate_string "${default}"
@@ -474,18 +616,9 @@ function validate_option() {
     # help validation
     validate_string "${help}"
 
-    # type validation
-    validate_string "${type}"
-    local validator="${VALIDATORS["${type}"]:-}"
-    if [[ -z "${validator}" ]]; then
-        script_exit "Option '${name}' has invalid type '${type}'"
-    fi
-
-    # required valiation
-    validate_boolean "${required}"
-
-    # constraints validation
-    "${validator}" "${default}" "${constraints}"
+    # Validate the actual value with its type and constraints
+    # NOTE: Validation now happens with actual parsed value, not default
+    local -r validator="${VALIDATORS[${type}]}"
     "${validator}" "${value}" "${constraints}"
 }
 
@@ -498,31 +631,34 @@ function validate_option() {
 # OUTS: Help message
 # RETS: 0 on success, 2 on failure
 function generate_help() {
-
-    echo "Options:"
-
     local -a displays=()
     local -a helps=()
     local max_width=0
 
-    # NOTE: help message render honors append order
-    for name in "${ORDERS[@]}"; do
-        local display=""
+    # Check if ORDERS array is empty
+    if [[ ${#ORDERS[@]} -eq 0 ]]; then
+        return
+    fi
 
-        # NOTE: add a blank line to separate built-in options with custom options
-        if [[ "${name}" == "--help" ]]; then
-            displays+=("")
-            helps+=("")
+    for name in "${ORDERS[@]}"; do
+        local short="${OPTION_SHORT["${name}"]:-}"
+        local default="${OPTION_DEFAULT["${name}"]:-}"
+        local help="${OPTION_HELP["${name}"]:-}"
+        local type="${OPTION_TYPE["${name}"]:-}"
+        local required="${OPTION_REQUIRED["${name}"]:-}"
+        local constraints="${OPTION_CONSTRAINTS["${name}"]:-}"
+
+        # Skip if type is missing, it means option not properly registered
+        if [[ -z "${type}" ]]; then
+            continue
         fi
 
-        IFS="${DELIM}" read -r short default help type required constraints <<<"${OPTIONS["${name}"]}"
-
-        display="${name}"
-        if [[ -n "${short:-}" ]]; then
+        local display="${name}"
+        if [[ -n "${short}" ]]; then
             display="${short}, ${name}"
         fi
 
-        if [[ "${type}" == "choice" && -n "${default:-}" ]]; then
+        if [[ "${type}" == "choice" && -n "${default}" ]]; then
             display+="=${default}"
         fi
 
@@ -530,23 +666,30 @@ function generate_help() {
             help+=" [required]"
         fi
 
-        if [[ -n "${constraints:-}" ]]; then
+        if [[ -n "${constraints}" ]]; then
             help+=" [constraints: ${constraints//,/, }]"
         fi
 
         displays+=("${display}")
         helps+=("${help}")
 
+        # Include option displays in overall width calculation
         if [[ ${#display} -gt $max_width ]]; then
             max_width=${#display}
         fi
     done
 
-    # dynamic width formatting
+    # Unified width formatting
     local format_width=$((max_width + 10))
-    for i in "${!displays[@]}"; do
-        printf "    %-${format_width}s %s\n" "${displays[$i]}" "${helps[$i]}"
-    done
+
+    echo "Options:"
+
+    # Show all options
+    if [[ ${#displays[@]} -gt 0 ]]; then
+        for i in "${!displays[@]}"; do
+            printf "    %-${format_width}s %s\n" "${displays[$i]}" "${helps[$i]}"
+        done
+    fi
 }
 
 # ============================================================================ #
@@ -568,19 +711,6 @@ declare -rA LOG_LEVELS=(["DBG"]=0 ["INF"]=1 ["WRN"]=2 ["ERR"]=3)
 # OUTS: Formatted log message to stderr
 # RETS: 0
 function _log() {
-
-    # caller validation
-    for func in "${FUNCNAME[@]}"; do
-        case "${func}" in
-        script_trap_err | script_trap_exit | script_exit)
-            script_exit "log system shouldn't be used inside script_trap_err, script_trap_exit, script_exit"
-            ;;
-        *)
-            continue
-            ;;
-        esac
-    done
-
     local -r level_num="$1"
     local color="$2"
     local -r log_type="$3"
@@ -588,24 +718,17 @@ function _log() {
     local log_message="$*"
     local timestamp=""
 
-    # skip if _log is called before parse_params
-    local -r log_level="${VALUES["--log-level"]:-}"
-    if [[ -n "${log_level}" ]]; then
-        local -r global_level_num="${LOG_LEVELS["${log_level}"]:-}"
-        if [[ -n "${global_level_num}" && "${level_num}" -lt "${global_level_num}" ]]; then
-            return 0
-        fi
+    local -r log_level="${VALUES["--log-level"]}"
+    local -r global_level_num="${LOG_LEVELS["${log_level}"]:-}"
+    if [[ "${level_num}" -lt "${global_level_num}" ]]; then
+        return 0
     fi
 
-    # skip if _log is called before parse_params
-    local -r is_no_color="${VALUES["--no-color"]:-}"
-    if [[ -n "${is_no_color}" && "${is_no_color}" == true ]]; then
+    if [[ "${VALUES["--no-color"]}" == true ]]; then
         color="${ta_none}"
     fi
 
-    # skip if _log is called before parse_params
-    local -r is_timestamp="${VALUES["--timestamp"]:-}"
-    if [[ -n "${is_timestamp}" && "${is_timestamp}" == true ]]; then
+    if [[ "${VALUES["--timestamp"]}" == true ]]; then
         timestamp="$(date +"[%Y-%m-%d %H:%M:%S %z]") "
     fi
 
@@ -669,22 +792,22 @@ function script_trap_err() {
     local -r exit_code="${1:-1}"
 
     # Output debug data if in Quiet mode - direct check without function calls
-    if [[ "${VALUES["--quiet"]:-}" == true ]]; then
+    if [[ "${VALUES["--quiet"]}" == true ]]; then
         # Restore original file output descriptors
-        if [[ -n "${script_output:-}" ]]; then
+        if [[ -n "${SCRIPT_OUTPUT:-}" ]]; then
             exec 1>&3 2>&4
         fi
 
         # Print basic debugging information using printf to avoid recursion
         critical "Abnormal termination of script"
-        critical "Script Path:       ${script_path:-unknown}"
-        critical "Script Parameters: ${script_params:-none}"
+        critical "Script Path:       ${SCRIPT_PATH:-unknown}"
+        critical "Script Parameters: ${SCRIPT_PARAMS:-none}"
         critical "Script Exit Code:  ${exit_code}"
 
         # Print the script log if we have it
-        if [[ -n "${script_output:-}" ]]; then
+        if [[ -n "${SCRIPT_OUTPUT:-}" ]]; then
             critical "Script Output:"
-            cat "${script_output}" >&2 || true
+            cat "${SCRIPT_OUTPUT}" >&2 || true
         else
             critical "Script Output: none (failed before log init)"
         fi
@@ -699,19 +822,22 @@ function script_trap_err() {
 # OUTS: None
 # RETS: None
 function script_trap_exit() {
-    cd "${orig_cwd}"
+    # Disable the exit trap handler to prevent potential recursion
+    trap - EXIT
+
+    cd "${ORIGINAL_CWD}"
 
     # Remove Quiet mode script log - direct check without function calls
     # NOTE: default value exception
-    if [[ "${VALUES["--quiet"]-}" == true && -n "${script_output-}" ]]; then
-        rm "${script_output}"
-        echo "Cleaned up script output: ${script_output}"
+    if [[ "${VALUES["--quiet"]}" == true && -n "${SCRIPT_OUTPUT-}" ]]; then
+        rm "${SCRIPT_OUTPUT}"
+        debug "Cleaned up script output: ${SCRIPT_OUTPUT}"
     fi
 
     # Remove script execution lock
-    if [[ -d "${script_lock-}" ]]; then
-        rmdir "${script_lock}"
-        echo "Cleaned up script lock: ${script_lock}"
+    if [[ -d "${SCRIPT_LOCK-}" ]]; then
+        rmdir "${SCRIPT_LOCK}"
+        debug "Cleaned up script lock: ${SCRIPT_LOCK}"
     fi
 
     # Restore terminal colors
@@ -808,45 +934,43 @@ function color_init() {
 
 # DESC: Generic script initialisation
 # ARGS: $@ (optional): Arguments provided to the script
-# OUTS: $orig_cwd:      The current working directory when the script was run
-#       $script_path:   The full path to the script
-#       $script_dir:    The directory path of the script
-#       $script_name:   The file name of the script
-#       $script_params: The original parameters provided to the script
+# OUTS: $ORIGINAL_CWD:  The current working directory when the script was run
+#       $SCRIPT_PATH:   The full path to the script
+#       $SCRIPT_DIR:    The directory path of the script
+#       $SCRIPT_NAME:   The file name of the script
+#       $SCRIPT_PARAMS: The original parameters provided to the script
 # RETS: None
-# NOTE: $script_path only contains the path that was used to call the script
+# NOTE: $SCRIPT_PATH only contains the path that was used to call the script
 #       and will not resolve any symlinks which may be present in the path.
 #       You can use a tool like realpath to obtain the "true" path. The same
-#       caveat applies to both the $script_dir and $script_name variables.
+#       caveat applies to both the $SCRIPT_DIR and $SCRIPT_NAME variables.
 # shellcheck disable=SC2034
 function script_init() {
     # Useful variables
-    readonly orig_cwd="${PWD}"
-    readonly script_params="$*"
-    readonly script_path="$(realpath "$0")"
-    readonly script_dir="$(dirname "${script_path}")"
-    readonly script_name="$(basename "${script_path}")"
+    readonly ORIGINAL_CWD="${PWD}"
+    readonly SCRIPT_PARAMS="$*"
+    readonly SCRIPT_PATH="$(realpath "$0")"
+    readonly SCRIPT_DIR="$(dirname "${SCRIPT_PATH}")"
+    readonly SCRIPT_NAME="$(basename "${SCRIPT_PATH}")"
 }
 
 # DESC: Initialise Quiet mode
 # ARGS: None
-# OUTS: $script_output: Path to the file stdout & stderr was redirected to
+# OUTS: $SCRIPT_OUTPUT: Path to the file stdout & stderr was redirected to
 # RETS: None
 function quiet_init() {
 
-    # NOTE: quiet_init() runs after parse_params(), there is no need for default value
     if [[ "${VALUES["--quiet"]}" == true ]]; then
         # Redirect all output to a temporary file
-
-        # CAUTION: comparable with BusyBox mktemp inside Alpine Image
-        readonly script_output="$(mktemp -p "/tmp" "${script_name}.XXXXXX")"
-        exec 3>&1 4>&2 1>"${script_output}" 2>&1
+        # NOTE: comparable with BusyBox `mktemp` inside Alpine Image
+        readonly SCRIPT_OUTPUT="$(mktemp -p "/tmp" "${SCRIPT_NAME}.XXXXXX")"
+        exec 3>&1 4>&2 1>"${SCRIPT_OUTPUT}" 2>&1
     fi
 }
 
 # DESC: Acquire script lock
 # ARGS: $1 (required): Scope of script execution lock (system or user)
-# OUTS: $script_lock: Path to the directory indicating we have the script lock
+# OUTS: $SCRIPT_LOCK: Path to the directory indicating we have the script lock
 # RETS: None
 # NOTE: This lock implementation is extremely simple but should be reliable
 #       across all platforms. It does *not* support locking a script with
@@ -859,16 +983,16 @@ function lock_init() {
     local -r scope="${1}"
     local lock_dir
     if [[ "${scope}" = "system" ]]; then
-        lock_dir="/tmp/${script_name}.lock"
+        lock_dir="/tmp/${SCRIPT_NAME}.lock"
     elif [[ "${scope}" = "user" ]]; then
-        lock_dir="/tmp/${script_name}.${UID}.lock"
+        lock_dir="/tmp/${SCRIPT_NAME}.${UID}.lock"
     else
         script_exit "Invalid scope: ${1}"
     fi
 
     if mkdir "${lock_dir}" 2>/dev/null; then
-        readonly script_lock="${lock_dir}"
-        echo "Acquired script lock: ${script_lock}"
+        readonly SCRIPT_LOCK="${lock_dir}"
+        debug "Acquired script lock: ${SCRIPT_LOCK}" >&2
     else
         script_exit "Unable to acquire script lock: ${lock_dir}"
     fi
@@ -993,21 +1117,20 @@ function run_as_root() {
     fi
 }
 
+# ============================================================================ #
+# CUSTOM LOGIC                                                                 #
+# ============================================================================ #
+
 # DESC: Register the a set of options
 # ARGS: None
-# OUTS: OPTIONS, ORDERS and VALUES are populated with data
+# OUTS: OPTIONS, ORDERS and VALUES data are populated
 # RETS: 0
 function option_init() {
-    # NOTE: long-name, short-name, default, help, type, required, constraints
-    # register_option ...
+    # --help, --log-level, --timestamp, --no-color, --quiet
+    register_builtin_options
 
-    # CAUTION: --help must be placed as the first option in the built-in options list
-    # CAUTION: I add a blank link on top of this function inside help message
-    register_option "--help" "-h" false "Display this help and exit" "bool"
-    register_option "--log-level" "-l" "INF" "Specify log level" "choice" false "DBG,INF,WRN,ERR"
-    register_option "--timestamp" "-t" false "Enable timestamp output" "bool"
-    register_option "--no-color" "-n" false "Disable color output" "bool"
-    register_option "--quiet" "-q" false "Run silently unless an error is encountered" "bool"
+    # Custom options
+    # ...
 }
 
 # DESC: Print help message when user declare --help, -h option
@@ -1032,6 +1155,10 @@ EOF
 
 }
 
+# ============================================================================ #
+# MAIN CONTROL FLOW                                                            #
+# ============================================================================ #
+
 # DESC: Main control flow
 # ARGS: $@ (optional): Arguments provided to the script
 # OUTS: None
@@ -1048,24 +1175,35 @@ function main() {
     lock_init user
 
     # start here
-    # shellcheck disable=SC2154
-    debug "script_params: ${script_params}"
-    # shellcheck disable=SC2154
-    debug "script_path: ${script_path}"
-    # shellcheck disable=SC2154
-    debug "script_dir: ${script_dir}"
-    # shellcheck disable=SC2154
-    debug "script_name: ${script_name}"
+    # ...
 
     # Logging helper functions
     error "This is an error message"
     warn "This is a warning message"
     info "This is an info message"
     debug "This is a debug message"
+
+    # Logging internal states
+    debug "SCRIPT_NAME: ${SCRIPT_NAME}"
+    debug "SCRIPT_PATH: ${SCRIPT_PATH}"
+    debug "SCRIPT_DIR: ${SCRIPT_DIR}"
+    debug "SCRIPT_PARAMS: ${SCRIPT_PARAMS}"
+
+    debug "Registered options: ${ORDERS[*]}"
+    debug "Parsed values:"
+    for key in "${!VALUES[@]}"; do
+        debug "  ${key} = '${VALUES[$key]}'"
+    done
+    debug "OPTION_SHORT:" "${OPTION_SHORT[@]}"
+    debug "OPTION_DEFAULT:" "${OPTION_DEFAULT[@]}"
+    debug "OPTION_TYPE:" "${OPTION_TYPE[@]}"
+    debug "OPTION_REQUIRED:" "${OPTION_REQUIRED[@]}"
+    debug "OPTION_CONSTRAINTS:" "${OPTION_CONSTRAINTS[@]}"
+    debug "OPTION_HELP:" "${OPTION_HELP[@]}"
 }
 
 # ============================================================================ #
-# Helper flags
+# SCRIPT INITIALIZATION FLAGS                                                  #
 # ============================================================================ #
 
 # Enable xtrace if the DEBUG environment variable is set

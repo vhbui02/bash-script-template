@@ -22,7 +22,7 @@ Licensed under [BSD 3-Clause License](LICENSE).
 ## Features
 
 -   **Zero dependencies:** All code is original and thoroughly audited by the author.
--   **Options as the SSOT:** No positional arguments or subcommands—simplicity is prioritized.
+-   **Options-only design:** No positional arguments or subcommands—options are the single source of truth, prioritizing simplicity.
 -   **Structured option handling:** Options are defined with clear metadata, allowing reliable registration, parsing, and validation.
 -   **Multi-level, color-coded logging:** Output messages at five levels (Debug, Info, Warning, Error, Critical) with color support.
 -   **Reliable locking mechanism:** Prevents concurrent script execution.
@@ -194,7 +194,7 @@ main "$@"
 
 ## Design Decisions
 
--   **Option-only approach:** No subcommands or positional arguments. Simplicity takes precedence.
+-   **Options-only approach:** This template is designed to handle options exclusively—no subcommands or positional arguments. For complex multi-command CLIs, use mature frameworks like Click (Python), Cobra (Go), or similar tools that are battle-tested for subcommand handling.
 -   **Conservative default syntax** (e.g. `${param:-}`): Use only for **optional arguments** and explicit exceptions. **AVOID overusing on every variable.**
 -   **Fail-fast philosophy:**
     -   Enable `set -e` to terminate the script when undefined variables are referenced unexpectedly.

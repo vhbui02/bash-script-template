@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+./test.sh "tests"
+if [[ $? -ne 0 ]]; then
+    echo "BATS tests failed. Push aborted."
+    exit 1
+fi

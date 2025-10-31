@@ -37,6 +37,5 @@ temp/
 
 # Misc
 node_modules
-hooks
 .memory-bank/
 memory-bank/

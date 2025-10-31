@@ -17,21 +17,20 @@
 
 # ============================================================================ #
 
+# ============================================================================ #
+# CUSTOM LOGIC                                                                 #
+# ============================================================================ #
+
 # DESC: Register the a set of options
 # ARGS: None
-# OUTS: OPTIONS, ORDERS and VALUES are populated with data
+# OUTS: OPTIONS, ORDERS and VALUES data are populated
 # RETS: 0
 function option_init() {
-    # NOTE: long-name, short-name, default, help, type, required, constraints
-    # register_option ...
+    # --help, --log-level, --timestamp, --no-color, --quiet
+    register_builtin_options
 
-    # CAUTION: --help must be placed as the first option in the built-in options list
-    # CAUTION: I add a blank link on top of this function inside help message
-    register_option "--help" "-h" false "Display this help and exit" "bool"
-    register_option "--log-level" "-l" "INF" "Specify log level" "choice" false "DBG,INF,WRN,ERR"
-    register_option "--timestamp" "-t" false "Enable timestamp output" "bool"
-    register_option "--no-color" "-n" false "Disable color output" "bool"
-    register_option "--quiet" "-q" false "Run silently unless an error is encountered" "bool"
+    # Custom options
+    # ...
 }
 
 # DESC: Print help message when user declare --help, -h option
@@ -56,6 +55,10 @@ EOF
 
 }
 
+# ============================================================================ #
+# MAIN CONTROL FLOW                                                            #
+# ============================================================================ #
+
 # DESC: Main control flow
 # ARGS: $@ (optional): Arguments provided to the script
 # OUTS: None
@@ -72,24 +75,35 @@ function main() {
     lock_init user
 
     # start here
-    # shellcheck disable=SC2154
-    debug "script_params: ${script_params}"
-    # shellcheck disable=SC2154
-    debug "script_path: ${script_path}"
-    # shellcheck disable=SC2154
-    debug "script_dir: ${script_dir}"
-    # shellcheck disable=SC2154
-    debug "script_name: ${script_name}"
+    # ...
 
     # Logging helper functions
     error "This is an error message"
     warn "This is a warning message"
     info "This is an info message"
     debug "This is a debug message"
+
+    # Logging internal states
+    debug "SCRIPT_NAME: ${SCRIPT_NAME}"
+    debug "SCRIPT_PATH: ${SCRIPT_PATH}"
+    debug "SCRIPT_DIR: ${SCRIPT_DIR}"
+    debug "SCRIPT_PARAMS: ${SCRIPT_PARAMS}"
+
+    debug "Registered options: ${ORDERS[*]}"
+    debug "Parsed values:"
+    for key in "${!VALUES[@]}"; do
+        debug "  ${key} = '${VALUES[$key]}'"
+    done
+    debug "OPTION_SHORT:" "${OPTION_SHORT[@]}"
+    debug "OPTION_DEFAULT:" "${OPTION_DEFAULT[@]}"
+    debug "OPTION_TYPE:" "${OPTION_TYPE[@]}"
+    debug "OPTION_REQUIRED:" "${OPTION_REQUIRED[@]}"
+    debug "OPTION_CONSTRAINTS:" "${OPTION_CONSTRAINTS[@]}"
+    debug "OPTION_HELP:" "${OPTION_HELP[@]}"
 }
 
 # ============================================================================ #
-# Helper flags
+# SCRIPT INITIALIZATION FLAGS                                                  #
 # ============================================================================ #
 
 # Enable xtrace if the DEBUG environment variable is set

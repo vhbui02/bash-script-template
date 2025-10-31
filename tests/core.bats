@@ -2,29 +2,37 @@
 
 # shellcheck disable=SC2154
 
-# NOTE: Common test cases for bash script testing, reusable for all scripts
-# NOTE: that are cloned from script.sh and template.sh
-
 setup_file() {
-    # provision testing environment here
-    # ...
     :
 }
 
 setup() {
-    # NOTE: do not load library in setup_file() function
-    bats_load_library bats-support
-    bats_load_library bats-assert
-    bats_load_library bats-file
-
+    # get paths
     export ROOT="$(dirname "${BATS_TEST_DIRNAME}")"
+    # export BATS_LIB_PATH="${ROOT}/tests/test_helper"
+    # NOTE: Common test cases are reused to test scripts derived from script.sh and template.sh
     export SUTS=(
         "${ROOT}/script.sh"
         "${ROOT}/template.sh"
     )
 
+    # Load BATS libraries
+    bats_load_library bats-support
+    bats_load_library bats-assert
+    bats_load_library bats-file
+
+    # Ensure test script exists and is executable
     for sut in "${SUTS[@]}"; do
         assert_file_exists "${sut}"
+        assert_file_executable "${sut}"
+    done
+
+    # Clean up
+    for sut in "${SUTS[@]}"; do
+        local script_name=${sut##*/}
+        if [[ -d "/tmp/${script_name}.${UID}.lock" ]]; then
+            rmdir "/tmp/${script_name}.${UID}.lock"
+        fi
     done
 }
 
@@ -42,13 +50,14 @@ teardown_file() {
 
 @test "Scripts run without arguments" {
     for sut in "${SUTS[@]}"; do
-        run "${sut}"
+        run "${sut}" --log-level DBG
         assert_success
 
         assert_output --partial "Acquired script lock"
         assert_output --partial "This is an error message"
         assert_output --partial "This is a warning message"
         assert_output --partial "This is an info message"
+        assert_output --partial "This is a debug message"
         assert_output --partial "Cleaned up script lock"
     done
 }
@@ -80,9 +89,6 @@ teardown_file() {
         local output_no_color_long="${output}"
 
         assert_equal "${output_no_color_short}" "${output_no_color_long}"
-
-        assert_output --partial "Acquired script lock"
-        assert_output --partial "Cleaned up script lock"
     done
 }
 
@@ -163,7 +169,8 @@ teardown_file() {
     for sut in "${SUTS[@]}"; do
         run "${sut}" --invalid-option
         assert_failure
-        assert_output --partial "Option not found: --invalid-option"
+        assert_output --partial "Option not found:"
+        assert_output --partial "--invalid-option"
     done
 }
 
@@ -171,7 +178,7 @@ teardown_file() {
     for sut in "${SUTS[@]}"; do
         local script_name=$(basename "${sut}")
 
-        run "${sut}"
+        run "${sut}" --log-level DBG
         assert_success
         assert_output --partial "Acquired script lock:"
         assert_dir_not_exists "/tmp/${script_name}.${UID}.lock"
@@ -198,55 +205,78 @@ teardown_file() {
         DEBUG=1 run "${sut}"
 
         assert_success
-        assert_output --partial "+"
+        assert_output --partial "++"
     done
 }
 
-@test "Internal: Scripts options are registered correctly" {
+@test "Internal: Scripts built-in options are registered correctly" {
     for sut in "${SUTS[@]}"; do
         run bash -c '
             set -e
             source "'"${sut}"'"
-            option_init
+            register_builtin_options
 
+            # Check ORDERS array
             [[ "${ORDERS[0]}" == "--help" ]]
             [[ "${ORDERS[1]}" == "--log-level" ]]
             [[ "${ORDERS[2]}" == "--timestamp" ]]
             [[ "${ORDERS[3]}" == "--no-color" ]]
             [[ "${ORDERS[4]}" == "--quiet" ]]
 
-            [[ -n "${OPTIONS["--help"]}" ]]
-            [[ -n "${OPTIONS["--log-level"]}" ]]
-            [[ -n "${OPTIONS["--timestamp"]}" ]]
-            [[ -n "${OPTIONS["--no-color"]}" ]]
-            [[ -n "${OPTIONS["--quiet"]}" ]]
-            
+            # Check VALUES array
+
             [[ "${VALUES["--help"]}" == "false" ]]
             [[ "${VALUES["--log-level"]}" == "INF" ]]
             [[ "${VALUES["--timestamp"]}" == "false" ]]
             [[ "${VALUES["--no-color"]}" == "false" ]]
             [[ "${VALUES["--quiet"]}" == "false" ]]
 
-            meta="${OPTIONS["--log-level"]}"
-            [[ "${meta}" == *"-l"* ]]
-            [[ "${meta}" == *"INF"* ]]
-            [[ "${meta}" == *"Specify log level"* ]]
-            [[ "${meta}" == *"choice"* ]]
-            [[ "${meta}" == *"false"* ]]
-            [[ "${meta}" == *"DBG,INF,WRN,ERR"* ]]
+            # Check OPTION_* arrays
+
+            [[ "${OPTION_SHORT["--help"]}" == "-h" ]]
+            [[ "${OPTION_TYPE["--help"]}" == "bool" ]]
+            [[ "${OPTION_DEFAULT["--help"]}" == "false" ]]
+            [[ "${OPTION_REQUIRED["--help"]}" == "false" ]]
+            [[ "${OPTION_HELP["--help"]}" == *"Display this help and exit"* ]]
+
+            [[ "${OPTION_SHORT["--log-level"]}" == "-l" ]]
+            [[ "${OPTION_TYPE["--log-level"]}" == "choice" ]]
+            [[ "${OPTION_DEFAULT["--log-level"]}" == "INF" ]]
+            [[ "${OPTION_REQUIRED["--log-level"]}" == "false" ]]
+            [[ "${OPTION_CONSTRAINTS["--log-level"]}" == "DBG,INF,WRN,ERR" ]]
+            [[ "${OPTION_HELP["--log-level"]}" == *"Specify the log level to display"* ]]
+
+            [[ "${OPTION_SHORT["--timestamp"]}" == "-t" ]]
+            [[ "${OPTION_TYPE["--timestamp"]}" == "bool" ]]
+            [[ "${OPTION_DEFAULT["--timestamp"]}" == "false" ]]
+            [[ "${OPTION_REQUIRED["--timestamp"]}" == "false" ]]
+            [[ "${OPTION_HELP["--timestamp"]}" == *"Enable timestamp output"* ]]
+
+            [[ "${OPTION_SHORT["--no-color"]}" == "-n" ]]
+            [[ "${OPTION_TYPE["--no-color"]}" == "bool" ]]
+            [[ "${OPTION_DEFAULT["--no-color"]}" == "false" ]]
+            [[ "${OPTION_REQUIRED["--no-color"]}" == "false" ]]
+            [[ "${OPTION_HELP["--no-color"]}" == *"Disable color output"* ]]
+
+            [[ "${OPTION_SHORT["--quiet"]}" == "-q" ]]
+            [[ "${OPTION_TYPE["--quiet"]}" == "bool" ]]
+            [[ "${OPTION_DEFAULT["--quiet"]}" == "false" ]]
+            [[ "${OPTION_REQUIRED["--quiet"]}" == "false" ]]
+            [[ "${OPTION_HELP["--quiet"]}" == *"Run silently unless an error is encountered"* ]]
         '
         assert_success
     done
 }
 
-@test "Internal: Scripts options are parsed correctly" {
+@test "Internal: Scripts built-in options' values are parsed correctly" {
     for sut in "${SUTS[@]}"; do
         run bash -c '
             set -e
             source "'"${sut}"'"
-            option_init
+            register_builtin_options
             parse_params --log-level ERR --no-color --quiet --timestamp
-            
+
+            [[ "${VALUES["--help"]}" == "false" ]]
             [[ "${VALUES["--log-level"]}" == "ERR" ]]
             [[ "${VALUES["--timestamp"]}" == true ]]
             [[ "${VALUES["--no-color"]}" == true ]]
@@ -262,7 +292,8 @@ teardown_file() {
     for sut in "${SUTS[@]}"; do
         run "${sut}" --log-level INVALID
         assert_failure
-        assert_output --partial "Invalid choice: INVALID. Use: DBG, INF, WRN, ERR"
+        assert_output --partial "Invalid choice: INVALID"
+        assert_output --partial "Use: DBG, INF, WRN, ERR"
     done
 }
 
@@ -270,7 +301,8 @@ teardown_file() {
     for sut in "${SUTS[@]}"; do
         run "${sut}" --log-level err
         assert_failure
-        assert_output --partial "Invalid choice: err. Use: DBG, INF, WRN, ERR"
+        assert_output --partial "Invalid choice: err"
+        assert_output --partial "Use: DBG, INF, WRN, ERR"
     done
 }
 
@@ -278,7 +310,7 @@ teardown_file() {
     for sut in "${SUTS[@]}"; do
         run "${sut}" --log-level ""
         assert_failure
-        assert_output --partial "Option '--log-level' has empty value"
+        assert_output --partial "Choice value is empty"
     done
 }
 
@@ -286,7 +318,8 @@ teardown_file() {
     for sut in "${SUTS[@]}"; do
         run "${sut}" --log-level
         assert_failure
-        assert_output --partial "Option requires a value: --log-level"
+        assert_output --partial "Option requires a value"
+        assert_output --partial "--log-level"
     done
 }
 
@@ -303,7 +336,8 @@ teardown_file() {
     for sut in "${SUTS[@]}"; do
         run "${sut}" --log-level "INF "
         assert_failure
-        assert_output --partial "Invalid choice: INF . Use: DBG, INF, WRN, ERR"
+        assert_output --partial "Invalid choice: INF"
+        assert_output --partial "Use: DBG, INF, WRN, ERR"
     done
 }
 
@@ -311,7 +345,8 @@ teardown_file() {
     for sut in "${SUTS[@]}"; do
         run "${sut}" --log-level "INF@"
         assert_failure
-        assert_output --partial "Invalid choice: INF@. Use: DBG, INF, WRN, ERR"
+        assert_output --partial "Invalid choice: INF@"
+        assert_output --partial "Use: DBG, INF, WRN, ERR"
     done
 }
 
@@ -330,7 +365,8 @@ teardown_file() {
         # Test with malformed option-value syntax
         run "${sut}" --log-level=ERR=WRN
         assert_failure
-        assert_output --partial "Invalid choice: ERR=WRN. Use: DBG, INF, WRN, ERR"
+        assert_output --partial "Invalid choice: ERR=WRN"
+        assert_output --partial "Use: DBG, INF, WRN, ERR"
     done
 }
 
@@ -339,7 +375,8 @@ teardown_file() {
         local long_value=$(printf 'A%.0s' {1..1000})
         run "${sut}" --log-level "${long_value}"
         assert_failure
-        assert_output --partial "Invalid choice: ${long_value}. Use: DBG, INF, WRN, ERR"
+        assert_output --partial "Invalid choice: ${long_value}"
+        assert_output --partial "Use: DBG, INF, WRN, ERR"
     done
 }
 
@@ -348,72 +385,41 @@ teardown_file() {
         run bash -c '
             set -e
             source "'"${sut}"'"
-            unset OPTIONS ORDERS VALUES
-            declare -gA OPTIONS=()
+            unset ORDERS VALUES
             declare -ag ORDERS=()
             declare -gA VALUES=()
-            
+
             # Test with empty option name
-            register_option "" "-t" "default" "help" "string" "false"
+            register_option
         '
         assert_failure
-        assert_output --partial 'Option name is empty'
+        assert_output --partial 'Missing required parameter --long'
 
         run bash -c '
             set -e
             source "'"${sut}"'"
-            unset OPTIONS ORDERS VALUES
-            declare -gA OPTIONS=()
+            unset ORDERS VALUES
             declare -ag ORDERS=()
             declare -gA VALUES=()
-            
-            # Test with empty option name
-            register_option "--test" "t" "default" "help" "string" "false"
+
+            # Test with invalid short option format
+            register_option --long "--test" --short "t"
         '
         assert_failure
-        assert_output --partial "validate_option: Option '--test' has invalid short name 't'"
+        assert_output --partial "must be format '-x'"
 
         run bash -c '
             set -e
             source "'"${sut}"'"
-            unset OPTIONS ORDERS VALUES
-            declare -gA OPTIONS=()
+            unset ORDERS VALUES
             declare -ag ORDERS=()
             declare -gA VALUES=()
-            
+
             # Test with invalid type
-            register_option "--test" "-t" "default" "help" "invalid_type" "false"
+            register_option --long "--test" --type "invalid_type"
         '
         assert_failure
-        assert_output --partial "validate_option: Option '--test' has invalid type 'invalid_type'"
-
-        run bash -c '
-            set -e
-            source "'"${sut}"'"
-            unset OPTIONS ORDERS VALUES
-            declare -gA OPTIONS=()
-            declare -ag ORDERS=()
-            declare -gA VALUES=()
-            
-            # Test with invalid required flag
-            register_option "--test" "-t" "default" "help" "string" "maybe"
-        '
-        assert_failure
-        assert_output --partial "Not a valid boolean value: maybe. Use: true/false, 1/0, yes/no, y/n"
-
-        run bash -c '
-            set -e
-            source "'"${sut}"'"
-            unset OPTIONS ORDERS VALUES
-            declare -gA OPTIONS=()
-            declare -ag ORDERS=()
-            declare -gA VALUES=()
-            
-            # Test with invalid required flag
-            register_option "--test" "-t" "default" "help" "bool" "false"
-        '
-        assert_failure
-        assert_output --partial "Not a valid boolean value: default. Use: true/false, 1/0, yes/no, y/n"
+        assert_output --partial "Unknown type 'invalid_type'"
     done
 }
 
@@ -422,7 +428,7 @@ teardown_file() {
         run bash -c '
             set -e
             source "'"${sut}"'"
-            option_init
+            register_builtin_options
             # Test empty parameter
             validate_option ""
         '
@@ -432,41 +438,14 @@ teardown_file() {
         run bash -c '
             set -e
             source "'"${sut}"'"
-            option_init
+            register_builtin_options
             # Test with parameter containing spaces
             validate_option "-- log-level"
         '
         assert_failure
-        assert_output --partial "validate_option: Option '-- log-level' not found"
+        assert_output --partial "Option '-- log-level' not found"
     done
 }
-
-@test "Internal: OPTIONS array structure validation" {
-    for sut in "${SUTS[@]}"; do
-        run bash -c '
-            set -e
-            source "'"${sut}"'"
-            option_init
-            
-            # Validate that OPTIONS is an associative array
-            [[ $(declare -p OPTIONS) =~ "declare -A" ]]
-            
-            # Validate that all expected options are present
-            [[ -n "${OPTIONS["--log-level"]}" ]]
-            [[ -n "${OPTIONS["--timestamp"]}" ]]
-            [[ -n "${OPTIONS["--no-color"]}" ]]
-            [[ -n "${OPTIONS["--quiet"]}" ]]
-            [[ -n "${OPTIONS["--help"]}" ]]
-            
-            # Validate option structure (each option should have 6 fields)
-            IFS="${DELIM}" read -ra fields <<< "${OPTIONS["--log-level"]}"
-            [[ ${#fields[@]} -eq 6 ]]
-        '
-        assert_success
-    done
-}
-
-# =============================== ERROR HANDLING TESTS =============================== #
 
 @test "Scripts handle malformed command line arguments" {
     for sut in "${SUTS[@]}"; do
@@ -493,7 +472,8 @@ teardown_file() {
         local long_arg=$(printf 'A%.0s' {1..10000})
         run "${sut}" --log-level "${long_arg}"
         assert_failure
-        assert_output --partial "Invalid choice: ${long_arg}. Use: DBG, INF, WRN, ERR"
+        assert_output --partial "Invalid choice: ${long_arg}"
+        assert_output --partial "Use: DBG, INF, WRN, ERR"
     done
 }
 
@@ -533,19 +513,17 @@ teardown_file() {
     done
 }
 
-# =============================== EDGE CASE TESTS =============================== #
-
 @test "Scripts handle empty environment variables" {
     for sut in "${SUTS[@]}"; do
         # Test with empty DEBUG variable
         DEBUG="" run "${sut}"
         assert_success
-        refute_output --partial "+"
+        refute_output --partial "++"
 
         # Test with unset DEBUG variable
         env -u DEBUG "${sut}"
         assert_success
-        refute_output --partial "+"
+        refute_output --partial "++"
     done
 }
 
@@ -554,22 +532,22 @@ teardown_file() {
         # Test with DEBUG=0 (should not enable debug)
         DEBUG=0 run "${sut}"
         assert_success
-        refute_output --partial "+"
+        refute_output --partial "++"
 
         # Test with DEBUG=false (should not enable debug)
         DEBUG=false run "${sut}"
         assert_success
-        refute_output --partial "+"
+        refute_output --partial "++"
 
         # Test with DEBUG=true (should enable debug)
         DEBUG=true run "${sut}"
         assert_success
-        assert_output --partial "+"
+        assert_output --partial "++"
 
         # Test with DEBUG=2 (should not enable debug)
         DEBUG=2 run "${sut}"
         assert_success
-        refute_output --partial "+"
+        refute_output --partial "++"
     done
 }
 

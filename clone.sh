@@ -3,16 +3,14 @@
 # ============================================================================ #
 
 ## FILE         : clone.sh
-## VERSION      : v3.0.0
+## VERSION      : 1.0.0
 ## DESCRIPTION  : Clone specific template into specific output
 ## AUTHOR       : silverbullet069
 ## REPOSITORY   : https://github.com/Silverbullet069/bash-script-template
 ## LICENSE      : BSD 3-Clause License
 
 ## TEMREPO      : https://github.com/Silverbullet069/bash-script-template
-## TEMMODE      : src
-## TEMVER       : v3.0.0
-## TEMUPDATED   : 2025-07-09 02:22:09.981519546 +0700
+## TEMAUTHOR    : Silverbullet069
 ## TEMLIC       : BSD 3-Clause License
 
 # ============================================================================ #
@@ -24,16 +22,30 @@
 # OUTS: SCRIPT_PARSED_VALUES populated with parsed parameters
 # RETS: 0
 function option_init() {
-    # NOTE: the order: long-name, short-name, default, help, type, required, constraints
-    register_option "--mode" "-m" "lite" "Template mode" "choice" true "full,lite,legacy,src"
-    register_option "--output" "-o" "${PWD}/temp.sh" "Output file path" "path"
-    register_option "--yes" "-y" false "Skip prompting for metadata" "bool"
+    register_builtin_options
 
-    register_option "--help" "-h" false "Display this help and exit" "bool"
-    register_option "--log-level" "-l" "INF" "Specify log level" "choice" false "DBG,INF,WRN,ERR"
-    register_option "--timestamp" "-t" false "Enable timestamp output" "bool"
-    register_option "--no-color" "-n" false "Disable color output" "bool"
-    register_option "--quiet" "-q" false "Run silently unless an error is encountered" "bool"
+    register_option \
+        --long "--mode" \
+        --short "-m" \
+        --type "choice" \
+        --default "lite" \
+        --required "true" \
+        --constraints "full,lite,legacy,src"\
+        --help "Template mode"
+
+    register_option \
+        --long "--output" \
+        --short "-o" \
+        --type "path" \
+        --default "${PWD}/temp.sh" \
+        --help "Output file path"
+
+    register_option \
+        --long "--yes" \
+        --short "-y" \
+        --type "bool" \
+        --default "false" \
+        --help "Skip prompting for metadata"
 }
 
 function print_help_message() {
@@ -53,7 +65,7 @@ To create a 'full' template with custom output destination:
 
     clone -m full -o path/to/script.bash
 
-By default, the script will prompt for information to be placed inside the 
+By default, the script will prompt for information to be placed inside the
 header. To skip prompting:
 
     clone -y ...
@@ -82,14 +94,14 @@ function main() {
     local -r mode="${VALUES["--mode"]}"
     local file=
     case "${mode}" in
+        legacy)
+            file="template_legacy.sh"
+            ;;
         full)
             file="template.sh"
             ;;
         lite)
             file="template_lite.sh"
-            ;;
-        legacy)
-            file="template_legacy.sh"
             ;;
         src)
             file="script.sh"
@@ -102,7 +114,7 @@ function main() {
 
     # Source path initialization
     # shellcheck disable=SC2154
-    local -r src="${script_dir}/${file}"
+    local -r src="${SCRIPT_DIR}/${file}"
     if [[ ! -f "${src}" ]]; then
         script_exit "${src} not found."
     fi
@@ -157,7 +169,7 @@ function main() {
 
     # add value to template-related placeholders
     local -r updated="$(stat -c "%y" "${src}" 2>/dev/null)"
-    local -r tag="$(ls -t "${script_dir}/.git/refs/tags" | head -n1)"
+    local -r tag="$(ls -t "${SCRIPT_DIR}/.git/refs/tags" | head -n1)"
 
     # Replace placeholders in the cloned file
     if ! sed -i \
@@ -175,7 +187,7 @@ function main() {
     fi
 
     if [[ "${mode}" == "src" ]]; then
-        local -r path="${script_dir}/source.sh"
+        local -r path="${SCRIPT_DIR}/source.sh"
         if [[ ! -f "${path}" ]]; then
             script_exit "${path} not found"
         fi

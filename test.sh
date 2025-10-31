@@ -3,7 +3,7 @@
 # ============================================================================ #
 
 ## FILE         : test.sh
-## VERSION      : v3.0.0
+## VERSION      : 1.0.0
 ## DESCRIPTION  : Execute runtime inside an isolated containerized environment.
 ## AUTHOR       : silverbullet069
 ## REPOSITORY   : https://github.com/Silverbullet069/bash-script-template
@@ -17,8 +17,29 @@
 
 # ============================================================================ #
 
+# DESC: An 'echo' wrapper that redirects standard output to standard error
+# ARGS: $@ (required): Message(s) to echo
+# OUTS: None
+# RETS: None
+function log() {
+    echo "$@" >&2
+}
+
+
+# FUNCTION: check_binary
+# DESC: Checks if a given binary/command is available in the system's PATH.
+# ARGS: $1 (required): Name of the binary/command to check.
+# OUTS: Prints an error message to stderr if the binary is missing.
+# RETS: Returns 1 if the binary is missing, 0 otherwise.
+function check_binary() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        log "Missing dependency '$1'"
+        return 1
+    fi
+}
+
 # DESC: Acquire script lock, extracted from script.sh
-# ARGS: $1 (optional): Scope of script execution lock (system or user)
+# ARGS: $1 (required): Scope of script execution lock (system or user)
 # OUTS: None
 # RETS: None
 # NOTE: This lock implementation is extremely simple but should be reliable
@@ -32,15 +53,15 @@ function lock_init() {
     elif [[ "${1}" = "user" ]]; then
         lock_dir="/tmp/$(basename "${BASH_SOURCE[0]}").${UID}.lock"
     else
-        echo "Missing or invalid argument to ${FUNCNAME[0]}()!" >&2
+        log "Missing or invalid argument to ${FUNCNAME[0]}()!"
         exit 1
     fi
 
     if mkdir "${lock_dir}" 2>/dev/null; then
         readonly script_lock="${lock_dir}"
-        echo "Acquired script lock: ${script_lock}"
+        log "Acquired script lock: ${script_lock}"
     else
-        echo "Unable to acquire script lock: ${lock_dir}" >&2
+        log "Unable to acquire script lock: ${lock_dir}"
         exit 2
     fi
 }
@@ -53,7 +74,7 @@ function script_trap_exit() {
     # Remove script execution lock
     if [[ -d "${script_lock-}" ]]; then
         rmdir "${script_lock}"
-        echo "Clean up script lock: ${script_lock}" >&2
+        log "Clean up script lock: ${script_lock}"
     fi
 }
 
@@ -86,6 +107,7 @@ function main() {
     trap script_trap_exit EXIT
     lock_init "user"
 
+    check_binary "docker"
     # Cre: https://bats-core.readthedocs.io/en/stable/docker-usage.html#basic-usage
     docker run \
         -u="1000:1000" \
@@ -95,8 +117,8 @@ function main() {
         --security-opt=no-new-privileges:true \
         -v="$PWD:/code:ro" \
         -w="/code" \
-        --cpus=0.5 \
-        -m="512m" \
+        --cpus=1 \
+        -m="1024m" \
         bats/bats:latest \
         "$@"
 }
